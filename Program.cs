@@ -45,7 +45,6 @@ namespace VinylNowPlaying
 
             SetupTrayIcon();
 
-            // Quick initial test check
             if (e.Args.Length > 0 && e.Args[0].Equals("--test", StringComparison.OrdinalIgnoreCase))
             {
                 _mainWindow.TriggerTestAnimation();
@@ -56,7 +55,6 @@ namespace VinylNowPlaying
         {
             _trayIcon = new NotifyIcon();
 
-            // Load app icon
             try
             {
                 if (File.Exists("app.ico"))
@@ -76,7 +74,6 @@ namespace VinylNowPlaying
             _trayIcon.Text = "Vinyl Now Playing - Виджет пластинки";
             _trayIcon.Visible = true;
 
-            // Tray Context Menu
             ContextMenuStrip menu = new ContextMenuStrip();
             menu.BackColor = System.Drawing.Color.FromArgb(28, 28, 32);
             menu.ForeColor = System.Drawing.Color.White;
@@ -92,15 +89,6 @@ namespace VinylNowPlaying
 
             menu.Items.Add(new ToolStripSeparator());
 
-            ToolStripMenuItem itemAlways = new ToolStripMenuItem("📌 Всегда виден при музыке");
-            itemAlways.Checked = _mainWindow.AlwaysVisibleWhilePlaying;
-            itemAlways.CheckOnClick = true;
-            itemAlways.CheckedChanged += (s, e) =>
-            {
-                _mainWindow.AlwaysVisibleWhilePlaying = itemAlways.Checked;
-            };
-            menu.Items.Add(itemAlways);
-
             ToolStripMenuItem itemReset = new ToolStripMenuItem("📍 Сбросить позицию (в угол)");
             itemReset.Click += (s, e) => _mainWindow.ResetPosition();
             menu.Items.Add(itemReset);
@@ -115,13 +103,6 @@ namespace VinylNowPlaying
             _trayIcon.ContextMenuStrip = menu;
 
             _trayIcon.DoubleClick += (s, e) => _mainWindow.ToggleVisibility();
-
-            // Balloon tip on start
-            _trayIcon.ShowBalloonTip(
-                3000,
-                "Vinyl Now Playing запущен!",
-                "Пластинка вылетит справа при старте музыки. Нажмите правой кнопкой на трей для настроек.",
-                ToolTipIcon.Info);
         }
 
         protected override void OnExit(ExitEventArgs e)

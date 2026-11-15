@@ -42,7 +42,11 @@ namespace VinylNowPlaying
         private TextBlock _txtTime;
         private Border _progressBarTrack;
         private Border _progressBarFill;
-        private StackPanel _controlsPanel;
+
+        // ONLY 3 BUTTONS: Назад, Пауза/Плей, Вперед
+        private Button _btnPrev;
+        private Button _btnPlay;
+        private Button _btnNext;
 
         // Fallback default label
         private VisualBrush _defaultCoverBrush;
@@ -50,32 +54,17 @@ namespace VinylNowPlaying
 
         // Animation state
         private bool _isFlownIn = false;
-        private DispatcherTimer _autoHideTimer;
         private DispatcherTimer _pollTimer;
 
-        // Settings
-        public bool AlwaysVisibleWhilePlaying { get; set; }
         private MediaManager _media;
 
         public MainWindow(MediaManager media)
         {
             _media = media;
-            AlwaysVisibleWhilePlaying = true;
 
             InitializeWindowProperties();
             CreateDefaultAssets();
             BuildUI();
-
-            _autoHideTimer = new DispatcherTimer();
-            _autoHideTimer.Interval = TimeSpan.FromSeconds(7);
-            _autoHideTimer.Tick += (s, e) =>
-            {
-                _autoHideTimer.Stop();
-                if (!AlwaysVisibleWhilePlaying && !IsMouseOver)
-                {
-                    FlyOut();
-                }
-            };
 
             _pollTimer = new DispatcherTimer();
             _pollTimer.Interval = TimeSpan.FromMilliseconds(500);
@@ -90,7 +79,6 @@ namespace VinylNowPlaying
         private void InitializeWindowProperties()
         {
             Title = "Vinyl Now Playing";
-            // Compact size (shorter length)
             Width = 350;
             Height = 96;
             WindowStyle = WindowStyle.None;
@@ -159,7 +147,7 @@ namespace VinylNowPlaying
 
         private void BuildUI()
         {
-            _slideTransform = new TranslateTransform(400, 0); // Start off-screen right
+            _slideTransform = new TranslateTransform(420, 0); // Start completely off-screen right
 
             _rootContainer = new Grid
             {
@@ -187,11 +175,11 @@ namespace VinylNowPlaying
             _rootContainer.ContextMenu = CreateContextMenu();
 
             // 1. THE CAPSULE CARD (Dark rounded rectangle)
-            // It starts at Left: 48px, so the left ~40px of the vinyl sticks OUTSIDE of it!
+            // Starts at Left: 48px, vinyl disc at Left: 8px -> vinyl protrudes ~40px outside to the left!
             _capsuleCard = new Border
             {
-                Width = 275,
-                Height = 72,
+                Width = 280,
+                Height = 74,
                 HorizontalAlignment = HorizontalAlignment.Left,
                 VerticalAlignment = VerticalAlignment.Center,
                 Margin = new Thickness(48, 0, 0, 0),
@@ -213,17 +201,20 @@ namespace VinylNowPlaying
                 }
             };
 
-            // Metadata Grid inside Capsule (offset from left to allow vinyl overlap)
             Grid metaGrid = new Grid
             {
-                Margin = new Thickness(44, 7, 14, 7)
+                Margin = new Thickness(44, 7, 12, 7)
             };
-            metaGrid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto }); // Title
-            metaGrid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto }); // Artist
+            metaGrid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto }); // Row 0: Title + 3 Buttons
+            metaGrid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto }); // Row 1: Artist
             metaGrid.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) }); // Spacer
-            metaGrid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto }); // Progress bar
+            metaGrid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto }); // Row 3: Progress bar + Time
 
-            // Title
+            // Top Row: Title on Left + 3 Buttons (Назад, Пауза/Плей, Вперед) on Right
+            Grid topRow = new Grid();
+            topRow.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+            topRow.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+
             _txtTitle = new TextBlock
             {
                 Text = "Ожидание трека...",
@@ -231,21 +222,54 @@ namespace VinylNowPlaying
                 FontWeight = FontWeights.SemiBold,
                 Foreground = Brushes.White,
                 TextTrimming = TextTrimming.CharacterEllipsis,
-                Margin = new Thickness(0, 0, 0, 0),
-                MaxWidth = 180
+                VerticalAlignment = VerticalAlignment.Center,
+                MaxWidth = 130
             };
-            Grid.SetRow(_txtTitle, 0);
-            metaGrid.Children.Add(_txtTitle);
+            Grid.SetColumn(_txtTitle, 0);
+            topRow.Children.Add(_txtTitle);
+
+            // Button Container with ONLY 3 buttons
+            StackPanel btnPanel = new StackPanel
+            {
+                Orientation = Orientation.Horizontal,
+                VerticalAlignment = VerticalAlignment.Center,
+                Margin = new Thickness(4, 0, 0, 0)
+            };
+
+            _btnPrev = CreateMediaButton("⏮", "Предыдущий трек", async (s, e) => {
+                e.Handled = true;
+                await _media.SkipPreviousAsync();
+            });
+
+            _btnPlay = CreateMediaButton("⏸", "Пауза / Воспроизведение", async (s, e) => {
+                e.Handled = true;
+                await _media.TogglePlayPauseAsync();
+            });
+
+            _btnNext = CreateMediaButton("⏭", "Следующий трек", async (s, e) => {
+                e.Handled = true;
+                await _media.SkipNextAsync();
+            });
+
+            btnPanel.Children.Add(_btnPrev);
+            btnPanel.Children.Add(_btnPlay);
+            btnPanel.Children.Add(_btnNext);
+
+            Grid.SetColumn(btnPanel, 1);
+            topRow.Children.Add(btnPanel);
+
+            Grid.SetRow(topRow, 0);
+            metaGrid.Children.Add(topRow);
 
             // Artist
             _txtArtist = new TextBlock
             {
-                Text = "Запустите Яндекс Музыку или плеер",
+                Text = "Запустите музыку",
                 FontSize = 11.5,
                 Foreground = new SolidColorBrush(Color.FromRgb(160, 160, 172)),
                 TextTrimming = TextTrimming.CharacterEllipsis,
                 Margin = new Thickness(0, 1, 0, 0),
-                MaxWidth = 180
+                MaxWidth = 200
             };
             Grid.SetRow(_txtArtist, 1);
             metaGrid.Children.Add(_txtArtist);
@@ -303,8 +327,6 @@ namespace VinylNowPlaying
             _rootContainer.Children.Add(_capsuleCard);
 
             // 2. VINYL RECORD (Left, PROTRUDING OUTSIDE the capsule as sketched!)
-            // Placed at Left: 8px, Width: 80px -> spans from X: 8 to 88.
-            // Capsule begins at X: 48, so X: 8 to 48 (40px) is completely OUTSIDE the capsule!
             _vinylDisc = new Grid
             {
                 Width = 80,
@@ -326,7 +348,6 @@ namespace VinylNowPlaying
             _vinylRotation = new RotateTransform(0);
             _vinylDisc.RenderTransform = _vinylRotation;
 
-            // Click vinyl to toggle play/pause
             _vinylDisc.MouseLeftButtonUp += async (s, e) =>
             {
                 e.Handled = true;
@@ -386,62 +407,23 @@ namespace VinylNowPlaying
 
             _rootContainer.Children.Add(_vinylDisc);
 
-            // 3. QUICK CONTROLS (Fade in on hover)
-            _controlsPanel = new StackPanel
-            {
-                Orientation = Orientation.Horizontal,
-                HorizontalAlignment = HorizontalAlignment.Right,
-                VerticalAlignment = VerticalAlignment.Top,
-                Margin = new Thickness(0, 16, 32, 0),
-                Opacity = 0
-            };
-
-            Button btnPrev = CreateHoverButton("⏮", "Предыдущий трек", async (s, e) => await _media.SkipPreviousAsync());
-            Button btnPlay = CreateHoverButton("⏯", "Пауза/Воспроизведение", async (s, e) => await _media.TogglePlayPauseAsync());
-            Button btnNext = CreateHoverButton("⏭", "Следующий трек", async (s, e) => await _media.SkipNextAsync());
-            Button btnClose = CreateHoverButton("✕", "Скрыть оверлей", (s, e) => FlyOut());
-
-            _controlsPanel.Children.Add(btnPrev);
-            _controlsPanel.Children.Add(btnPlay);
-            _controlsPanel.Children.Add(btnNext);
-            _controlsPanel.Children.Add(btnClose);
-
-            _rootContainer.Children.Add(_controlsPanel);
-
-            // Hover fade-in
-            _rootContainer.MouseEnter += (s, e) =>
-            {
-                DoubleAnimation fade = new DoubleAnimation(1, TimeSpan.FromMilliseconds(180));
-                _controlsPanel.BeginAnimation(UIElement.OpacityProperty, fade);
-                _autoHideTimer.Stop();
-            };
-            _rootContainer.MouseLeave += (s, e) =>
-            {
-                DoubleAnimation fade = new DoubleAnimation(0, TimeSpan.FromMilliseconds(220));
-                _controlsPanel.BeginAnimation(UIElement.OpacityProperty, fade);
-                if (!AlwaysVisibleWhilePlaying && _isFlownIn)
-                {
-                    _autoHideTimer.Start();
-                }
-            };
-
             Content = _rootContainer;
 
             SetupVinylAnimation();
         }
 
-        private Button CreateHoverButton(string symbol, string tooltip, RoutedEventHandler onClick)
+        private Button CreateMediaButton(string symbol, string tooltip, RoutedEventHandler onClick)
         {
             Button btn = new Button
             {
                 Content = symbol,
                 ToolTip = tooltip,
                 Width = 22,
-                Height = 20,
+                Height = 22,
                 Margin = new Thickness(2, 0, 2, 0),
-                FontSize = 10,
-                Foreground = new SolidColorBrush(Color.FromRgb(190, 190, 200)),
-                Background = new SolidColorBrush(Color.FromArgb(90, 25, 25, 30)),
+                FontSize = 10.5,
+                Foreground = new SolidColorBrush(Color.FromRgb(220, 220, 230)),
+                Background = new SolidColorBrush(Color.FromArgb(95, 36, 36, 44)),
                 BorderThickness = new Thickness(0),
                 Cursor = Cursors.Hand
             };
@@ -472,19 +454,6 @@ namespace VinylNowPlaying
             menu.Items.Add(miPrev);
 
             menu.Items.Add(new Separator { Background = new SolidColorBrush(Color.FromRgb(45, 45, 52)) });
-
-            MenuItem miAlways = new MenuItem
-            {
-                Header = "📌 Всегда виден при воспроизведении",
-                IsCheckable = true,
-                IsChecked = AlwaysVisibleWhilePlaying,
-                Foreground = Brushes.White
-            };
-            miAlways.Click += (s, e) =>
-            {
-                AlwaysVisibleWhilePlaying = miAlways.IsChecked;
-            };
-            menu.Items.Add(miAlways);
 
             MenuItem miTest = new MenuItem { Header = "🎬 Тест анимации (Демо трек)", Foreground = Brushes.White };
             miTest.Click += (s, e) => TriggerTestAnimation();
@@ -548,19 +517,13 @@ namespace VinylNowPlaying
 
             DoubleAnimation slide = new DoubleAnimation
             {
-                From = 400,
+                From = 420,
                 To = 0,
                 Duration = TimeSpan.FromMilliseconds(500),
                 EasingFunction = new CubicEase { EasingMode = EasingMode.EaseOut }
             };
             _slideTransform.BeginAnimation(TranslateTransform.XProperty, slide);
             StartSpinning();
-
-            if (!AlwaysVisibleWhilePlaying)
-            {
-                _autoHideTimer.Stop();
-                _autoHideTimer.Start();
-            }
         }
 
         public void FlyOut()
@@ -571,7 +534,7 @@ namespace VinylNowPlaying
             DoubleAnimation slide = new DoubleAnimation
             {
                 From = 0,
-                To = 400,
+                To = 420,
                 Duration = TimeSpan.FromMilliseconds(420),
                 EasingFunction = new CubicEase { EasingMode = EasingMode.EaseIn }
             };
@@ -631,13 +594,17 @@ namespace VinylNowPlaying
                     _coverLabel.Fill = _defaultCoverBrush;
                 }
 
-                FlyIn();
+                // ВЫЕЗД ПЛАШКИ ТОЛЬКО ПРИ МУЗЫКЕ!
                 if (info.IsPlaying)
                 {
+                    _btnPlay.Content = "⏸";
+                    FlyIn();
                     ResumeSpinning();
                 }
                 else
                 {
+                    _btnPlay.Content = "▶";
+                    FlyOut();
                     PauseSpinning();
                 }
             });
@@ -647,18 +614,18 @@ namespace VinylNowPlaying
         {
             Dispatcher.Invoke(() =>
             {
+                // ВЫЕЗД ПЛАШКИ ТОЛЬКО ПРИ МУЗЫКЕ!
                 if (isPlaying)
                 {
+                    _btnPlay.Content = "⏸";
                     FlyIn();
                     ResumeSpinning();
                 }
                 else
                 {
+                    _btnPlay.Content = "▶";
+                    FlyOut();
                     PauseSpinning();
-                    if (!AlwaysVisibleWhilePlaying)
-                    {
-                        FlyOut();
-                    }
                 }
             });
         }
@@ -713,7 +680,6 @@ namespace VinylNowPlaying
         protected override void OnClosed(EventArgs e)
         {
             _pollTimer.Stop();
-            _autoHideTimer.Stop();
             base.OnClosed(e);
         }
     }
