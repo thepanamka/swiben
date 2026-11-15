@@ -1,4 +1,5 @@
 using System;
+using System.Collections;
 using System.IO;
 using System.Reflection;
 using System.Threading.Tasks;
@@ -29,6 +30,9 @@ namespace VinylNowPlaying
         private Assembly _rtAsm;
         private MethodInfo _asTaskGeneric;
 
+        private Type _propType;
+        private Type _streamType;
+
         private object _currentSession;
         private string _lastTrackKey = "";
         private bool _lastIsPlaying = false;
@@ -45,6 +49,10 @@ namespace VinylNowPlaying
             {
                 _mgrType = Type.GetType("Windows.Media.Control.GlobalSystemMediaTransportControlsSessionManager, Windows.Media, ContentType=WindowsRuntime");
                 if (_mgrType == null) return;
+
+                _propType = Type.GetType("Windows.Media.Control.GlobalSystemMediaTransportControlsSessionMediaProperties, Windows.Media, ContentType=WindowsRuntime");
+                _streamType = Type.GetType("Windows.Storage.Streams.IRandomAccessStreamWithContentType, Windows.Storage, ContentType=WindowsRuntime")
+                           ?? Type.GetType("Windows.Storage.Streams.IRandomAccessStream, Windows.Storage, ContentType=WindowsRuntime");
 
                 _rtAsm = Assembly.Load("System.Runtime.WindowsRuntime, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089");
                 Type extType = _rtAsm.GetType("System.WindowsRuntimeSystemExtensions");
@@ -80,8 +88,50 @@ namespace VinylNowPlaying
 
             try
             {
-                MethodInfo getSession = _mgrType.GetMethod("GetCurrentSession", BindingFlags.Public | BindingFlags.Instance);
-                object session = getSession.Invoke(_sessionManager, null);
+                // Select active session:
+                // 1. First check GetCurrentSession()
+                // 2. Also inspect GetSessions() to see if another player (e.g. Yandex Music) is currently Playing!
+                object session = null;
+                try
+                {
+                    MethodInfo getCurSession = _mgrType.GetMethod("GetCurrentSession", BindingFlags.Public | BindingFlags.Instance);
+                    session = getCurSession.Invoke(_sessionManager, null);
+                }
+                catch { }
+
+                // Check all sessions to find any actively playing session
+                try
+                {
+                    MethodInfo getAllSessions = _mgrType.GetMethod("GetSessions", BindingFlags.Public | BindingFlags.Instance);
+                    object allSessionsList = getAllSessions.Invoke(_sessionManager, null);
+                    if (allSessionsList is IEnumerable)
+                    {
+                        object playingSession = null;
+                        foreach (object s in (IEnumerable)allSessionsList)
+                        {
+                            if (s == null) continue;
+                            int status = GetSessionPlaybackStatus(s);
+                            if (status == 4) // Playing!
+                            {
+                                playingSession = s;
+                                break;
+                            }
+                        }
+                        if (playingSession != null)
+                        {
+                            session = playingSession;
+                        }
+                        else if (session == null)
+                        {
+                            // If current is null, take the first available
+                            IEnumerator en = ((IEnumerable)allSessionsList).GetEnumerator();
+                            if (en.MoveNext())
+                                session = en.Current;
+                        }
+                    }
+                }
+                catch { }
+
                 _currentSession = session;
 
                 if (session == null)
@@ -97,18 +147,9 @@ namespace VinylNowPlaying
 
                 Type sessionType = session.GetType();
 
-                // 1. Playback Info
-                MethodInfo getPlayback = sessionType.GetMethod("GetPlaybackInfo");
-                object playbackInfo = getPlayback.Invoke(session, null);
-                bool isPlaying = false;
-
-                if (playbackInfo != null)
-                {
-                    object statusObj = playbackInfo.GetType().GetProperty("PlaybackStatus").GetValue(playbackInfo, null);
-                    int statusInt = Convert.ToInt32(statusObj);
-                    // 4 = Playing
-                    isPlaying = (statusInt == 4);
-                }
+                // 1. Playback status
+                int statusInt = GetSessionPlaybackStatus(session);
+                bool isPlaying = (statusInt == 4);
 
                 if (isPlaying != _lastIsPlaying)
                 {
@@ -119,10 +160,9 @@ namespace VinylNowPlaying
 
                 // 2. Media Properties
                 object propOp = sessionType.GetMethod("TryGetMediaPropertiesAsync").Invoke(session, null);
-                Type propOpType = propOp.GetType();
-                Type propType = propOpType.GetGenericArguments()[0];
+                if (propOp == null) return;
 
-                MethodInfo asTaskProp = _asTaskGeneric.MakeGenericMethod(propType);
+                MethodInfo asTaskProp = _asTaskGeneric.MakeGenericMethod(_propType);
                 Task propTask = (Task)asTaskProp.Invoke(null, new object[] { propOp });
                 await propTask.ConfigureAwait(false);
 
@@ -171,7 +211,10 @@ namespace VinylNowPlaying
                                 thumbBytes = await ExtractThumbnailBytesAsync(thumbRef).ConfigureAwait(false);
                             }
                         }
-                        catch { }
+                        catch (Exception ex)
+                        {
+                            System.Diagnostics.Debug.WriteLine("Thumb error: " + ex.Message);
+                        }
 
                         TrackInfo info = new TrackInfo
                         {
@@ -192,22 +235,35 @@ namespace VinylNowPlaying
             }
             catch (Exception ex)
             {
-                System.Diagnostics.Debug.WriteLine("MediaManager Update Error: " + ex.Message);
+                System.Diagnostics.Debug.WriteLine("MediaManager Update Error: " + ex);
             }
+        }
+
+        private int GetSessionPlaybackStatus(object session)
+        {
+            if (session == null) return 0;
+            try
+            {
+                MethodInfo getPlayback = session.GetType().GetMethod("GetPlaybackInfo");
+                object pb = getPlayback.Invoke(session, null);
+                if (pb != null)
+                {
+                    object statusObj = pb.GetType().GetProperty("PlaybackStatus").GetValue(pb, null);
+                    return Convert.ToInt32(statusObj);
+                }
+            }
+            catch { }
+            return 0;
         }
 
         private async Task<byte[]> ExtractThumbnailBytesAsync(object thumbRef)
         {
-            if (thumbRef == null) return null;
-            Type refType = thumbRef.GetType();
-            MethodInfo openMethod = refType.GetMethod("OpenReadAsync");
+            if (thumbRef == null || _streamType == null) return null;
+            MethodInfo openMethod = thumbRef.GetType().GetMethod("OpenReadAsync");
             if (openMethod == null) return null;
 
             object asyncOp = openMethod.Invoke(thumbRef, null);
-            Type opType = asyncOp.GetType();
-            Type streamType = opType.GetGenericArguments()[0];
-
-            MethodInfo asTask = _asTaskGeneric.MakeGenericMethod(streamType);
+            MethodInfo asTask = _asTaskGeneric.MakeGenericMethod(_streamType);
             Task streamTask = (Task)asTask.Invoke(null, new object[] { asyncOp });
             await streamTask.ConfigureAwait(false);
 
@@ -282,19 +338,22 @@ namespace VinylNowPlaying
         private async Task AwaitGenericAsync(object asyncOp)
         {
             if (asyncOp == null || _asTaskGeneric == null) return;
-            Type opType = asyncOp.GetType();
-            Type resType = opType.GetGenericArguments()[0];
-            MethodInfo asTask = _asTaskGeneric.MakeGenericMethod(resType);
-            Task t = (Task)asTask.Invoke(null, new object[] { asyncOp });
-            await t.ConfigureAwait(false);
+            try
+            {
+                Type boolType = typeof(bool);
+                MethodInfo asTask = _asTaskGeneric.MakeGenericMethod(boolType);
+                Task t = (Task)asTask.Invoke(null, new object[] { asyncOp });
+                await t.ConfigureAwait(false);
+            }
+            catch { }
         }
 
         private string CleanAppId(string raw)
         {
             if (string.IsNullOrEmpty(raw)) return "Музыка";
             string lower = raw.ToLowerInvariant();
+            if (lower.Contains("yandex") || lower.Contains("music")) return "Яндекс Музыка";
             if (lower.Contains("spotify")) return "Spotify";
-            if (lower.Contains("yandex")) return "Яндекс Музыка";
             if (lower.Contains("chrome")) return "Chrome";
             if (lower.Contains("firefox")) return "Firefox";
             if (lower.Contains("msedge") || lower.Contains("edge")) return "Edge";
@@ -307,7 +366,6 @@ namespace VinylNowPlaying
             if (lower.Contains("apple")) return "Apple Music";
             if (lower.Contains("vk")) return "VK Музыка";
 
-            // If it's a path or package id, extract base name
             int lastSlash = Math.Max(raw.LastIndexOf('\\'), raw.LastIndexOf('/'));
             if (lastSlash >= 0 && lastSlash < raw.Length - 1)
                 raw = raw.Substring(lastSlash + 1);

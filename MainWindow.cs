@@ -29,8 +29,9 @@ namespace VinylNowPlaying
         private static extern int SetWindowLong(IntPtr hWnd, int nIndex, int dwNewLong);
 
         // UI Elements
-        private Border _rootCard;
+        private Grid _rootContainer;
         private TranslateTransform _slideTransform;
+        private Border _capsuleCard;
         private Grid _vinylDisc;
         private RotateTransform _vinylRotation;
         private Storyboard _rotationStoryboard;
@@ -38,7 +39,6 @@ namespace VinylNowPlaying
         private ImageBrush _coverBrush;
         private TextBlock _txtTitle;
         private TextBlock _txtArtist;
-        private TextBlock _txtAppBadge;
         private TextBlock _txtTime;
         private Border _progressBarTrack;
         private Border _progressBarFill;
@@ -90,8 +90,9 @@ namespace VinylNowPlaying
         private void InitializeWindowProperties()
         {
             Title = "Vinyl Now Playing";
-            Width = 430;
-            Height = 120;
+            // Compact size (shorter length)
+            Width = 350;
+            Height = 96;
             WindowStyle = WindowStyle.None;
             AllowsTransparency = true;
             Background = Brushes.Transparent;
@@ -102,14 +103,13 @@ namespace VinylNowPlaying
 
             // Place in bottom right corner above taskbar
             Rect workArea = SystemParameters.WorkArea;
-            Left = workArea.Right - Width - 24;
-            Top = workArea.Bottom - Height - 24;
+            Left = workArea.Right - Width - 20;
+            Top = workArea.Bottom - Height - 20;
         }
 
         protected override void OnSourceInitialized(EventArgs e)
         {
             base.OnSourceInitialized(e);
-            // Apply ToolWindow and NoActivate styles
             IntPtr handle = new WindowInteropHelper(this).Handle;
             int exStyle = GetWindowLong(handle, GWL_EXSTYLE);
             SetWindowLong(handle, GWL_EXSTYLE, exStyle | WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE);
@@ -117,7 +117,6 @@ namespace VinylNowPlaying
 
         private void CreateDefaultAssets()
         {
-            // Load embedded vinyl base texture
             try
             {
                 Assembly asm = Assembly.GetExecutingAssembly();
@@ -136,20 +135,20 @@ namespace VinylNowPlaying
             }
             catch { }
 
-            // Default fallback album art (retro crimson vinyl label)
-            Grid defGrid = new Grid { Width = 64, Height = 64 };
+            // Default retro crimson album art
+            Grid defGrid = new Grid { Width = 48, Height = 48 };
             Ellipse bg = new Ellipse
             {
-                Width = 64,
-                Height = 64,
-                Fill = new RadialGradientBrush(Color.FromRgb(215, 38, 56), Color.FromRgb(110, 15, 25))
+                Width = 48,
+                Height = 48,
+                Fill = new RadialGradientBrush(Color.FromRgb(220, 42, 58), Color.FromRgb(115, 15, 25))
             };
             TextBlock note = new TextBlock
             {
                 Text = "♫",
-                FontSize = 26,
+                FontSize = 20,
                 FontWeight = FontWeights.Bold,
-                Foreground = new SolidColorBrush(Color.FromArgb(200, 255, 255, 255)),
+                Foreground = new SolidColorBrush(Color.FromArgb(210, 255, 255, 255)),
                 HorizontalAlignment = HorizontalAlignment.Center,
                 VerticalAlignment = VerticalAlignment.Center
             };
@@ -160,60 +159,169 @@ namespace VinylNowPlaying
 
         private void BuildUI()
         {
-            _slideTransform = new TranslateTransform(480, 0); // Start off-screen right
+            _slideTransform = new TranslateTransform(400, 0); // Start off-screen right
 
-            _rootCard = new Border
+            _rootContainer = new Grid
             {
-                Width = 420,
-                Height = 110,
-                CornerRadius = new CornerRadius(36),
-                Background = new LinearGradientBrush(
-                    Color.FromRgb(20, 20, 23),
-                    Color.FromRgb(11, 11, 13),
-                    new Point(0, 0),
-                    new Point(1, 1)),
-                BorderBrush = new SolidColorBrush(Color.FromRgb(44, 44, 52)),
-                BorderThickness = new Thickness(1.2),
+                Width = 350,
+                Height = 96,
+                Background = Brushes.Transparent,
                 RenderTransform = _slideTransform,
-                ClipToBounds = false,
-                Effect = new DropShadowEffect
-                {
-                    Color = Colors.Black,
-                    BlurRadius = 24,
-                    ShadowDepth = 5,
-                    Direction = 315,
-                    Opacity = 0.82
-                }
+                ClipToBounds = false
             };
 
-            // Allow dragging window anywhere on desktop
-            _rootCard.MouseLeftButtonDown += (s, e) =>
+            // Allow dragging anywhere on screen
+            _rootContainer.MouseLeftButtonDown += (s, e) =>
             {
                 if (e.ButtonState == MouseButtonState.Pressed)
                     DragMove();
             };
 
             // Double click resets position to dock
-            _rootCard.MouseLeftButtonDown += (s, e) =>
+            _rootContainer.MouseLeftButtonDown += (s, e) =>
             {
                 if (e.ClickCount == 2)
                     ResetPosition();
             };
 
-            _rootCard.ContextMenu = CreateContextMenu();
+            _rootContainer.ContextMenu = CreateContextMenu();
 
-            Grid layoutGrid = new Grid();
-
-            // 1. VINYL RECORD (Left)
-            _vinylDisc = new Grid
+            // 1. THE CAPSULE CARD (Dark rounded rectangle)
+            // It starts at Left: 48px, so the left ~40px of the vinyl sticks OUTSIDE of it!
+            _capsuleCard = new Border
             {
-                Width = 96,
-                Height = 96,
+                Width = 275,
+                Height = 72,
                 HorizontalAlignment = HorizontalAlignment.Left,
                 VerticalAlignment = VerticalAlignment.Center,
-                Margin = new Thickness(10, 0, 0, 0),
+                Margin = new Thickness(48, 0, 0, 0),
+                CornerRadius = new CornerRadius(24),
+                Background = new LinearGradientBrush(
+                    Color.FromRgb(20, 20, 24),
+                    Color.FromRgb(11, 11, 13),
+                    new Point(0, 0),
+                    new Point(1, 1)),
+                BorderBrush = new SolidColorBrush(Color.FromRgb(46, 46, 56)),
+                BorderThickness = new Thickness(1.2),
+                Effect = new DropShadowEffect
+                {
+                    Color = Colors.Black,
+                    BlurRadius = 18,
+                    ShadowDepth = 4,
+                    Direction = 315,
+                    Opacity = 0.85
+                }
+            };
+
+            // Metadata Grid inside Capsule (offset from left to allow vinyl overlap)
+            Grid metaGrid = new Grid
+            {
+                Margin = new Thickness(44, 7, 14, 7)
+            };
+            metaGrid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto }); // Title
+            metaGrid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto }); // Artist
+            metaGrid.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) }); // Spacer
+            metaGrid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto }); // Progress bar
+
+            // Title
+            _txtTitle = new TextBlock
+            {
+                Text = "Ожидание трека...",
+                FontSize = 13.5,
+                FontWeight = FontWeights.SemiBold,
+                Foreground = Brushes.White,
+                TextTrimming = TextTrimming.CharacterEllipsis,
+                Margin = new Thickness(0, 0, 0, 0),
+                MaxWidth = 180
+            };
+            Grid.SetRow(_txtTitle, 0);
+            metaGrid.Children.Add(_txtTitle);
+
+            // Artist
+            _txtArtist = new TextBlock
+            {
+                Text = "Запустите Яндекс Музыку или плеер",
+                FontSize = 11.5,
+                Foreground = new SolidColorBrush(Color.FromRgb(160, 160, 172)),
+                TextTrimming = TextTrimming.CharacterEllipsis,
+                Margin = new Thickness(0, 1, 0, 0),
+                MaxWidth = 180
+            };
+            Grid.SetRow(_txtArtist, 1);
+            metaGrid.Children.Add(_txtArtist);
+
+            // Progress Bar & Time
+            Grid progContainer = new Grid
+            {
+                VerticalAlignment = VerticalAlignment.Bottom,
+                Margin = new Thickness(0, 0, 0, 1)
+            };
+            progContainer.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+            progContainer.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+
+            Grid barTrack = new Grid { Height = 3.5 };
+            _progressBarTrack = new Border
+            {
+                Height = 3.5,
+                Background = new SolidColorBrush(Color.FromRgb(36, 36, 44)),
+                CornerRadius = new CornerRadius(1.75)
+            };
+            barTrack.Children.Add(_progressBarTrack);
+
+            _progressBarFill = new Border
+            {
+                Height = 3.5,
+                Width = 0,
+                HorizontalAlignment = HorizontalAlignment.Left,
+                Background = new LinearGradientBrush(
+                    Color.FromRgb(255, 255, 255),
+                    Color.FromRgb(200, 205, 215),
+                    new Point(0, 0),
+                    new Point(1, 0)),
+                CornerRadius = new CornerRadius(1.75)
+            };
+            barTrack.Children.Add(_progressBarFill);
+
+            Grid.SetRow(barTrack, 0);
+            progContainer.Children.Add(barTrack);
+
+            _txtTime = new TextBlock
+            {
+                Text = "00:00 / 00:00",
+                FontSize = 9.5,
+                Foreground = new SolidColorBrush(Color.FromRgb(110, 110, 122)),
+                HorizontalAlignment = HorizontalAlignment.Right,
+                Margin = new Thickness(0, 2, 0, 0)
+            };
+            Grid.SetRow(_txtTime, 1);
+            progContainer.Children.Add(_txtTime);
+
+            Grid.SetRow(progContainer, 3);
+            metaGrid.Children.Add(progContainer);
+
+            _capsuleCard.Child = metaGrid;
+            _rootContainer.Children.Add(_capsuleCard);
+
+            // 2. VINYL RECORD (Left, PROTRUDING OUTSIDE the capsule as sketched!)
+            // Placed at Left: 8px, Width: 80px -> spans from X: 8 to 88.
+            // Capsule begins at X: 48, so X: 8 to 48 (40px) is completely OUTSIDE the capsule!
+            _vinylDisc = new Grid
+            {
+                Width = 80,
+                Height = 80,
+                HorizontalAlignment = HorizontalAlignment.Left,
+                VerticalAlignment = VerticalAlignment.Center,
+                Margin = new Thickness(8, 0, 0, 0),
                 RenderTransformOrigin = new Point(0.5, 0.5),
-                Cursor = Cursors.Hand
+                Cursor = Cursors.Hand,
+                Effect = new DropShadowEffect
+                {
+                    Color = Colors.Black,
+                    BlurRadius = 14,
+                    ShadowDepth = 3,
+                    Direction = 315,
+                    Opacity = 0.9
+                }
             };
             _vinylRotation = new RotateTransform(0);
             _vinylDisc.RenderTransform = _vinylRotation;
@@ -225,28 +333,26 @@ namespace VinylNowPlaying
                 await _media.TogglePlayPauseAsync();
             };
 
-            // Vinyl Base Texture
             if (_vinylBaseTexture != null)
             {
                 Image vinylImg = new Image
                 {
                     Source = _vinylBaseTexture,
-                    Width = 96,
-                    Height = 96,
+                    Width = 80,
+                    Height = 80,
                     Stretch = Stretch.UniformToFill
                 };
                 _vinylDisc.Children.Add(vinylImg);
             }
             else
             {
-                // Procedural disc fallback
                 Ellipse disc = new Ellipse
                 {
-                    Width = 96,
-                    Height = 96,
-                    Fill = new RadialGradientBrush(Color.FromRgb(30, 30, 34), Color.FromRgb(14, 14, 16)),
-                    Stroke = new SolidColorBrush(Color.FromRgb(60, 60, 68)),
-                    StrokeThickness = 1.5
+                    Width = 80,
+                    Height = 80,
+                    Fill = new RadialGradientBrush(Color.FromRgb(28, 28, 32), Color.FromRgb(12, 12, 14)),
+                    Stroke = new SolidColorBrush(Color.FromRgb(55, 55, 62)),
+                    StrokeThickness = 1.2
                 };
                 _vinylDisc.Children.Add(disc);
             }
@@ -255,146 +361,38 @@ namespace VinylNowPlaying
             _coverBrush = new ImageBrush { Stretch = Stretch.UniformToFill };
             _coverLabel = new Ellipse
             {
-                Width = 44,
-                Height = 44,
+                Width = 36,
+                Height = 36,
                 HorizontalAlignment = HorizontalAlignment.Center,
                 VerticalAlignment = VerticalAlignment.Center,
                 Fill = _defaultCoverBrush,
-                Stroke = new SolidColorBrush(Color.FromRgb(28, 28, 32)),
-                StrokeThickness = 1.5
+                Stroke = new SolidColorBrush(Color.FromRgb(24, 24, 28)),
+                StrokeThickness = 1.2
             };
             _vinylDisc.Children.Add(_coverLabel);
 
             // Spindle Center Hole
-            Ellipse spindleRing = new Ellipse
+            Ellipse spindle = new Ellipse
             {
-                Width = 10,
-                Height = 10,
+                Width = 8,
+                Height = 8,
                 HorizontalAlignment = HorizontalAlignment.Center,
                 VerticalAlignment = VerticalAlignment.Center,
                 Fill = new SolidColorBrush(Color.FromRgb(12, 12, 14)),
                 Stroke = new SolidColorBrush(Color.FromRgb(85, 85, 95)),
-                StrokeThickness = 1.2
+                StrokeThickness = 1
             };
-            _vinylDisc.Children.Add(spindleRing);
+            _vinylDisc.Children.Add(spindle);
 
-            layoutGrid.Children.Add(_vinylDisc);
+            _rootContainer.Children.Add(_vinylDisc);
 
-            // 2. METADATA & PROGRESS (Right)
-            Grid metaGrid = new Grid
-            {
-                Margin = new Thickness(118, 12, 16, 12)
-            };
-            metaGrid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto }); // Header (App badge + time)
-            metaGrid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto }); // Title
-            metaGrid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto }); // Artist
-            metaGrid.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) }); // Spacer
-            metaGrid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto }); // Progress bar
-
-            // Header row
-            Grid headerRow = new Grid();
-            headerRow.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
-            headerRow.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
-            headerRow.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
-
-            _txtAppBadge = new TextBlock
-            {
-                Text = "МУЗЫКА",
-                FontSize = 9.5,
-                FontWeight = FontWeights.Bold,
-                Foreground = new SolidColorBrush(Color.FromRgb(140, 140, 150)),
-                Background = new SolidColorBrush(Color.FromArgb(60, 255, 255, 255)),
-                Padding = new Thickness(5, 1, 5, 1),
-                VerticalAlignment = VerticalAlignment.Center
-            };
-            Border badgeBorder = new Border
-            {
-                CornerRadius = new CornerRadius(4),
-                Child = _txtAppBadge
-            };
-            Grid.SetColumn(badgeBorder, 0);
-            headerRow.Children.Add(badgeBorder);
-
-            _txtTime = new TextBlock
-            {
-                Text = "00:00 / 00:00",
-                FontSize = 10.5,
-                Foreground = new SolidColorBrush(Color.FromRgb(115, 115, 125)),
-                HorizontalAlignment = HorizontalAlignment.Right,
-                VerticalAlignment = VerticalAlignment.Center
-            };
-            Grid.SetColumn(_txtTime, 2);
-            headerRow.Children.Add(_txtTime);
-
-            Grid.SetRow(headerRow, 0);
-            metaGrid.Children.Add(headerRow);
-
-            // Title
-            _txtTitle = new TextBlock
-            {
-                Text = "Ожидание трека...",
-                FontSize = 14.5,
-                FontWeight = FontWeights.SemiBold,
-                Foreground = Brushes.White,
-                TextTrimming = TextTrimming.CharacterEllipsis,
-                Margin = new Thickness(0, 3, 0, 0)
-            };
-            Grid.SetRow(_txtTitle, 1);
-            metaGrid.Children.Add(_txtTitle);
-
-            // Artist
-            _txtArtist = new TextBlock
-            {
-                Text = "Запустите музыку в любом плеере",
-                FontSize = 12.5,
-                Foreground = new SolidColorBrush(Color.FromRgb(165, 165, 175)),
-                TextTrimming = TextTrimming.CharacterEllipsis,
-                Margin = new Thickness(0, 1, 0, 0)
-            };
-            Grid.SetRow(_txtArtist, 2);
-            metaGrid.Children.Add(_txtArtist);
-
-            // Progress Bar
-            Grid progressContainer = new Grid
-            {
-                Height = 5,
-                VerticalAlignment = VerticalAlignment.Bottom,
-                Margin = new Thickness(0, 0, 0, 2)
-            };
-            _progressBarTrack = new Border
-            {
-                Height = 4,
-                Background = new SolidColorBrush(Color.FromRgb(36, 36, 42)),
-                CornerRadius = new CornerRadius(2)
-            };
-            progressContainer.Children.Add(_progressBarTrack);
-
-            _progressBarFill = new Border
-            {
-                Height = 4,
-                HorizontalAlignment = HorizontalAlignment.Left,
-                Width = 0,
-                Background = new LinearGradientBrush(
-                    Color.FromRgb(255, 255, 255),
-                    Color.FromRgb(200, 205, 215),
-                    new Point(0, 0),
-                    new Point(1, 0)),
-                CornerRadius = new CornerRadius(2)
-            };
-            progressContainer.Children.Add(_progressBarFill);
-
-            Grid.SetRow(progressContainer, 4);
-            metaGrid.Children.Add(progressContainer);
-
-            layoutGrid.Children.Add(metaGrid);
-
-            // 3. QUICK CONTROLS OVERLAY (Fade in on hover)
+            // 3. QUICK CONTROLS (Fade in on hover)
             _controlsPanel = new StackPanel
             {
                 Orientation = Orientation.Horizontal,
                 HorizontalAlignment = HorizontalAlignment.Right,
                 VerticalAlignment = VerticalAlignment.Top,
-                Margin = new Thickness(0, 6, 8, 0),
+                Margin = new Thickness(0, 16, 32, 0),
                 Opacity = 0
             };
 
@@ -408,18 +406,18 @@ namespace VinylNowPlaying
             _controlsPanel.Children.Add(btnNext);
             _controlsPanel.Children.Add(btnClose);
 
-            layoutGrid.Children.Add(_controlsPanel);
+            _rootContainer.Children.Add(_controlsPanel);
 
-            // Hover fade-in for controls
-            _rootCard.MouseEnter += (s, e) =>
+            // Hover fade-in
+            _rootContainer.MouseEnter += (s, e) =>
             {
-                DoubleAnimation fade = new DoubleAnimation(1, TimeSpan.FromMilliseconds(200));
+                DoubleAnimation fade = new DoubleAnimation(1, TimeSpan.FromMilliseconds(180));
                 _controlsPanel.BeginAnimation(UIElement.OpacityProperty, fade);
-                _autoHideTimer.Stop(); // Don't auto-hide while user is interacting
+                _autoHideTimer.Stop();
             };
-            _rootCard.MouseLeave += (s, e) =>
+            _rootContainer.MouseLeave += (s, e) =>
             {
-                DoubleAnimation fade = new DoubleAnimation(0, TimeSpan.FromMilliseconds(250));
+                DoubleAnimation fade = new DoubleAnimation(0, TimeSpan.FromMilliseconds(220));
                 _controlsPanel.BeginAnimation(UIElement.OpacityProperty, fade);
                 if (!AlwaysVisibleWhilePlaying && _isFlownIn)
                 {
@@ -427,10 +425,8 @@ namespace VinylNowPlaying
                 }
             };
 
-            _rootCard.Child = layoutGrid;
-            Content = _rootCard;
+            Content = _rootContainer;
 
-            // Setup continuous clockwise spinning animation
             SetupVinylAnimation();
         }
 
@@ -440,12 +436,12 @@ namespace VinylNowPlaying
             {
                 Content = symbol,
                 ToolTip = tooltip,
-                Width = 24,
-                Height = 22,
+                Width = 22,
+                Height = 20,
                 Margin = new Thickness(2, 0, 2, 0),
-                FontSize = 11,
+                FontSize = 10,
                 Foreground = new SolidColorBrush(Color.FromRgb(190, 190, 200)),
-                Background = new SolidColorBrush(Color.FromArgb(80, 25, 25, 30)),
+                Background = new SolidColorBrush(Color.FromArgb(90, 25, 25, 30)),
                 BorderThickness = new Thickness(0),
                 Cursor = Cursors.Hand
             };
@@ -514,7 +510,7 @@ namespace VinylNowPlaying
             {
                 From = 0,
                 To = 360,
-                Duration = TimeSpan.FromSeconds(3.2),
+                Duration = TimeSpan.FromSeconds(3.0),
                 RepeatBehavior = RepeatBehavior.Forever
             };
             Storyboard.SetTarget(spin, _vinylDisc);
@@ -552,9 +548,9 @@ namespace VinylNowPlaying
 
             DoubleAnimation slide = new DoubleAnimation
             {
-                From = 480,
+                From = 400,
                 To = 0,
-                Duration = TimeSpan.FromMilliseconds(550),
+                Duration = TimeSpan.FromMilliseconds(500),
                 EasingFunction = new CubicEase { EasingMode = EasingMode.EaseOut }
             };
             _slideTransform.BeginAnimation(TranslateTransform.XProperty, slide);
@@ -575,8 +571,8 @@ namespace VinylNowPlaying
             DoubleAnimation slide = new DoubleAnimation
             {
                 From = 0,
-                To = 480,
-                Duration = TimeSpan.FromMilliseconds(450),
+                To = 400,
+                Duration = TimeSpan.FromMilliseconds(420),
                 EasingFunction = new CubicEase { EasingMode = EasingMode.EaseIn }
             };
             slide.Completed += (s, e) =>
@@ -597,8 +593,8 @@ namespace VinylNowPlaying
         public void ResetPosition()
         {
             Rect workArea = SystemParameters.WorkArea;
-            Left = workArea.Right - Width - 24;
-            Top = workArea.Bottom - Height - 24;
+            Left = workArea.Right - Width - 20;
+            Top = workArea.Bottom - Height - 20;
         }
 
         public void SetTrackInfo(TrackInfo info)
@@ -607,7 +603,6 @@ namespace VinylNowPlaying
             {
                 _txtTitle.Text = string.IsNullOrEmpty(info.Title) ? "Неизвестный трек" : info.Title;
                 _txtArtist.Text = string.IsNullOrEmpty(info.Artist) ? "Неизвестный автор" : info.Artist;
-                _txtAppBadge.Text = (info.SourceApp ?? "МУЗЫКА").ToUpperInvariant();
 
                 // Update Cover Art
                 if (info.ThumbnailBytes != null && info.ThumbnailBytes.Length > 0)
@@ -636,7 +631,6 @@ namespace VinylNowPlaying
                     _coverLabel.Fill = _defaultCoverBrush;
                 }
 
-                // If music is playing or new track arrived, trigger Fly In!
                 FlyIn();
                 if (info.IsPlaying)
                 {
@@ -676,7 +670,7 @@ namespace VinylNowPlaying
                 if (dur.TotalSeconds > 0)
                 {
                     _txtTime.Text = string.Format("{0:mm\\:ss} / {1:mm\\:ss}", pos, dur);
-                    double maxWidth = 280; // approximate width of track
+                    double maxWidth = 180;
                     double fraction = Math.Max(0, Math.Min(1, pos.TotalSeconds / dur.TotalSeconds));
                     _progressBarFill.Width = maxWidth * fraction;
                 }
@@ -690,16 +684,15 @@ namespace VinylNowPlaying
 
         public void TriggerTestAnimation()
         {
-            // Demo Track for immediate testing!
             TrackInfo demo = new TrackInfo
             {
-                Title = "Get Lucky (feat. Pharrell Williams)",
-                Artist = "Daft Punk",
-                Album = "Random Access Memories",
-                SourceApp = "Spotify",
+                Title = "NaNaNa",
+                Artist = "Aarne, Toxi$, OG Buda",
+                Album = "AA LANGUAGE 2",
+                SourceApp = "Яндекс Музыка",
                 IsPlaying = true,
-                Position = TimeSpan.FromMinutes(1).Add(TimeSpan.FromSeconds(24)),
-                Duration = TimeSpan.FromMinutes(4).Add(TimeSpan.FromSeconds(8))
+                Position = TimeSpan.FromMinutes(1).Add(TimeSpan.FromSeconds(14)),
+                Duration = TimeSpan.FromMinutes(2).Add(TimeSpan.FromSeconds(55))
             };
             SetTrackInfo(demo);
             SetTimeline(demo.Position, demo.Duration);
