@@ -18,15 +18,12 @@ using System.Windows.Media.Effects;
 using System.Windows.Media.Imaging;
 using System.Windows.Shapes;
 using System.Windows.Threading;
-using Microsoft.Win32;
 
 using Application = System.Windows.Application;
-using Button = System.Windows.Controls.Button;
 using Cursors = System.Windows.Input.Cursors;
 using HorizontalAlignment = System.Windows.HorizontalAlignment;
 using MenuItem = System.Windows.Controls.MenuItem;
 using MessageBox = System.Windows.MessageBox;
-using Orientation = System.Windows.Controls.Orientation;
 using Point = System.Windows.Point;
 using Size = System.Windows.Size;
 using WpfContextMenu = System.Windows.Controls.ContextMenu;
@@ -204,6 +201,7 @@ namespace VinylNowPlaying
                     string friendlyApp = CleanAppId(appId);
                     string key = title + "___" + artist;
 
+                    // Timeline calculation with LastUpdatedTime interpolation
                     TimeSpan position = TimeSpan.Zero;
                     TimeSpan duration = TimeSpan.Zero;
                     try
@@ -215,6 +213,19 @@ namespace VinylNowPlaying
                             Type tt = timeline.GetType();
                             position = (TimeSpan)tt.GetProperty("Position").GetValue(timeline, null);
                             duration = (TimeSpan)tt.GetProperty("EndTime").GetValue(timeline, null);
+
+                            object lastUp = tt.GetProperty("LastUpdatedTime").GetValue(timeline, null);
+                            if (lastUp is DateTimeOffset && isPlaying)
+                            {
+                                DateTimeOffset dto = (DateTimeOffset)lastUp;
+                                TimeSpan delta = DateTimeOffset.Now - dto;
+                                if (delta.TotalSeconds > 0 && delta.TotalHours < 24)
+                                {
+                                    position += delta;
+                                    if (duration.TotalSeconds > 0 && position > duration)
+                                        position = duration;
+                                }
+                            }
                         }
                     }
                     catch { }
@@ -311,64 +322,6 @@ namespace VinylNowPlaying
             }
         }
 
-        public async Task TogglePlayPauseAsync()
-        {
-            if (_currentSession == null) return;
-            try
-            {
-                MethodInfo m = _currentSession.GetType().GetMethod("TryTogglePlayPauseAsync");
-                if (m != null)
-                {
-                    object op = m.Invoke(_currentSession, null);
-                    await AwaitGenericAsync(op).ConfigureAwait(false);
-                }
-            }
-            catch { }
-        }
-
-        public async Task SkipNextAsync()
-        {
-            if (_currentSession == null) return;
-            try
-            {
-                MethodInfo m = _currentSession.GetType().GetMethod("TrySkipNextAsync");
-                if (m != null)
-                {
-                    object op = m.Invoke(_currentSession, null);
-                    await AwaitGenericAsync(op).ConfigureAwait(false);
-                }
-            }
-            catch { }
-        }
-
-        public async Task SkipPreviousAsync()
-        {
-            if (_currentSession == null) return;
-            try
-            {
-                MethodInfo m = _currentSession.GetType().GetMethod("TrySkipPreviousAsync");
-                if (m != null)
-                {
-                    object op = m.Invoke(_currentSession, null);
-                    await AwaitGenericAsync(op).ConfigureAwait(false);
-                }
-            }
-            catch { }
-        }
-
-        private async Task AwaitGenericAsync(object asyncOp)
-        {
-            if (asyncOp == null || _asTaskGeneric == null) return;
-            try
-            {
-                Type boolType = typeof(bool);
-                MethodInfo asTask = _asTaskGeneric.MakeGenericMethod(boolType);
-                Task t = (Task)asTask.Invoke(null, new object[] { asyncOp });
-                await t.ConfigureAwait(false);
-            }
-            catch { }
-        }
-
         private string CleanAppId(string raw)
         {
             if (string.IsNullOrEmpty(raw)) return "Музыка";
@@ -426,16 +379,19 @@ namespace VinylNowPlaying
         private Border _progressBarTrack;
         private Border _progressBarFill;
 
-        private Button _btnPrev;
-        private Button _btnPlay;
-        private Button _btnNext;
-
         private VisualBrush _defaultCoverBrush;
         private BitmapImage _vinylBaseTexture;
 
         private bool _isFlownIn = false;
         private DispatcherTimer _pollTimer;
+        private DispatcherTimer _smoothTimelineTimer;
         private MediaManager _media;
+
+        // Smooth live timeline tracking
+        private TimeSpan _currentPosition = TimeSpan.Zero;
+        private TimeSpan _duration = TimeSpan.Zero;
+        private DateTime _lastUpdateMoment = DateTime.MinValue;
+        private bool _isPlaying = false;
 
         public MainWindow(MediaManager media)
         {
@@ -445,11 +401,20 @@ namespace VinylNowPlaying
             CreateDefaultAssets();
             BuildUI();
 
+            // Poll media session every 400ms
             _pollTimer = new DispatcherTimer();
-            _pollTimer.Interval = TimeSpan.FromMilliseconds(500);
+            _pollTimer.Interval = TimeSpan.FromMilliseconds(400);
             _pollTimer.Tick += async (s, e) =>
             {
                 await _media.UpdateAsync();
+            };
+
+            // Smooth 100ms timer for real-time live timeline movement!
+            _smoothTimelineTimer = new DispatcherTimer();
+            _smoothTimelineTimer.Interval = TimeSpan.FromMilliseconds(100);
+            _smoothTimelineTimer.Tick += (s, e) =>
+            {
+                UpdateLiveTimeline();
             };
 
             Loaded += OnLoaded;
@@ -554,6 +519,7 @@ namespace VinylNowPlaying
 
             _rootContainer.ContextMenu = CreateContextMenu();
 
+            // 1. THE CAPSULE CARD (Чистый минималистичный вид: Название, Автор, Таймлайн)
             _capsuleCard = new Border
             {
                 Width = 280,
@@ -581,17 +547,14 @@ namespace VinylNowPlaying
 
             Grid metaGrid = new Grid
             {
-                Margin = new Thickness(44, 7, 12, 7)
+                Margin = new Thickness(44, 8, 14, 8)
             };
-            metaGrid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
-            metaGrid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
-            metaGrid.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
-            metaGrid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+            metaGrid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto }); // Название трека
+            metaGrid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto }); // Автор
+            metaGrid.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) }); // Отступ
+            metaGrid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto }); // Таймлайн
 
-            Grid topRow = new Grid();
-            topRow.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
-            topRow.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
-
+            // Название песни
             _txtTitle = new TextBlock
             {
                 Text = "Ожидание трека...",
@@ -600,43 +563,12 @@ namespace VinylNowPlaying
                 Foreground = System.Windows.Media.Brushes.White,
                 TextTrimming = TextTrimming.CharacterEllipsis,
                 VerticalAlignment = VerticalAlignment.Center,
-                MaxWidth = 130
+                MaxWidth = 215
             };
-            Grid.SetColumn(_txtTitle, 0);
-            topRow.Children.Add(_txtTitle);
+            Grid.SetRow(_txtTitle, 0);
+            metaGrid.Children.Add(_txtTitle);
 
-            StackPanel btnPanel = new StackPanel
-            {
-                Orientation = Orientation.Horizontal,
-                VerticalAlignment = VerticalAlignment.Center,
-                Margin = new Thickness(4, 0, 0, 0)
-            };
-
-            _btnPrev = CreateMediaButton("⏮", "Предыдущий трек", async (s, e) => {
-                e.Handled = true;
-                await _media.SkipPreviousAsync();
-            });
-
-            _btnPlay = CreateMediaButton("⏸", "Пауза / Воспроизведение", async (s, e) => {
-                e.Handled = true;
-                await _media.TogglePlayPauseAsync();
-            });
-
-            _btnNext = CreateMediaButton("⏭", "Следующий трек", async (s, e) => {
-                e.Handled = true;
-                await _media.SkipNextAsync();
-            });
-
-            btnPanel.Children.Add(_btnPrev);
-            btnPanel.Children.Add(_btnPlay);
-            btnPanel.Children.Add(_btnNext);
-
-            Grid.SetColumn(btnPanel, 1);
-            topRow.Children.Add(btnPanel);
-
-            Grid.SetRow(topRow, 0);
-            metaGrid.Children.Add(topRow);
-
+            // Автор
             _txtArtist = new TextBlock
             {
                 Text = "Запустите музыку",
@@ -644,11 +576,12 @@ namespace VinylNowPlaying
                 Foreground = new SolidColorBrush(System.Windows.Media.Color.FromRgb(160, 160, 172)),
                 TextTrimming = TextTrimming.CharacterEllipsis,
                 Margin = new Thickness(0, 1, 0, 0),
-                MaxWidth = 200
+                MaxWidth = 215
             };
             Grid.SetRow(_txtArtist, 1);
             metaGrid.Children.Add(_txtArtist);
 
+            // Таймлайн (Прогресс бар и время)
             Grid progContainer = new Grid
             {
                 VerticalAlignment = VerticalAlignment.Bottom,
@@ -700,6 +633,7 @@ namespace VinylNowPlaying
             _capsuleCard.Child = metaGrid;
             _rootContainer.Children.Add(_capsuleCard);
 
+            // 2. ВИНstorage/ПЛАСТИНКА (слева, выступает за пределы капсулы)
             _vinylDisc = new Grid
             {
                 Width = 80,
@@ -708,7 +642,6 @@ namespace VinylNowPlaying
                 VerticalAlignment = VerticalAlignment.Center,
                 Margin = new Thickness(8, 0, 0, 0),
                 RenderTransformOrigin = new Point(0.5, 0.5),
-                Cursor = Cursors.Hand,
                 Effect = new DropShadowEffect
                 {
                     Color = Colors.Black,
@@ -720,12 +653,6 @@ namespace VinylNowPlaying
             };
             _vinylRotation = new RotateTransform(0);
             _vinylDisc.RenderTransform = _vinylRotation;
-
-            _vinylDisc.MouseLeftButtonUp += async (s, e) =>
-            {
-                e.Handled = true;
-                await _media.TogglePlayPauseAsync();
-            };
 
             if (_vinylBaseTexture != null)
             {
@@ -783,25 +710,6 @@ namespace VinylNowPlaying
             SetupVinylAnimation();
         }
 
-        private Button CreateMediaButton(string symbol, string tooltip, RoutedEventHandler onClick)
-        {
-            Button btn = new Button
-            {
-                Content = symbol,
-                ToolTip = tooltip,
-                Width = 22,
-                Height = 22,
-                Margin = new Thickness(2, 0, 2, 0),
-                FontSize = 10.5,
-                Foreground = new SolidColorBrush(System.Windows.Media.Color.FromRgb(220, 220, 230)),
-                Background = new SolidColorBrush(System.Windows.Media.Color.FromArgb(95, 36, 36, 44)),
-                BorderThickness = new Thickness(0),
-                Cursor = Cursors.Hand
-            };
-            btn.Click += onClick;
-            return btn;
-        }
-
         private WpfContextMenu CreateContextMenu()
         {
             WpfContextMenu menu = new WpfContextMenu
@@ -812,23 +720,9 @@ namespace VinylNowPlaying
                 BorderThickness = new Thickness(1)
             };
 
-            MenuItem miPlay = new MenuItem { Header = "⏯ Воспроизведение / Пауза", Foreground = System.Windows.Media.Brushes.White };
-            miPlay.Click += async (s, e) => await _media.TogglePlayPauseAsync();
-            menu.Items.Add(miPlay);
-
-            MenuItem miNext = new MenuItem { Header = "⏭ Следующий трек", Foreground = System.Windows.Media.Brushes.White };
-            miNext.Click += async (s, e) => await _media.SkipNextAsync();
-            menu.Items.Add(miNext);
-
-            MenuItem miPrev = new MenuItem { Header = "⏮ Предыдущий трек", Foreground = System.Windows.Media.Brushes.White };
-            miPrev.Click += async (s, e) => await _media.SkipPreviousAsync();
-            menu.Items.Add(miPrev);
-
-            menu.Items.Add(new Separator { Background = new SolidColorBrush(System.Windows.Media.Color.FromRgb(45, 45, 52)) });
-
             MenuItem miAuto = new MenuItem
             {
-                Header = "🚀 Автозагрузка с Windows",
+                Header = "🚀 Автозагрузка (Папка Startup)",
                 IsCheckable = true,
                 IsChecked = Program.IsAutoStartEnabled(),
                 Foreground = System.Windows.Media.Brushes.White
@@ -908,6 +802,7 @@ namespace VinylNowPlaying
             };
             _slideTransform.BeginAnimation(TranslateTransform.XProperty, slide);
             StartSpinning();
+            _smoothTimelineTimer.Start();
         }
 
         public void FlyOut()
@@ -925,6 +820,7 @@ namespace VinylNowPlaying
             slide.Completed += (s, e) =>
             {
                 PauseSpinning();
+                _smoothTimelineTimer.Stop();
             };
             _slideTransform.BeginAnimation(TranslateTransform.XProperty, slide);
         }
@@ -977,15 +873,15 @@ namespace VinylNowPlaying
                     _coverLabel.Fill = _defaultCoverBrush;
                 }
 
+                _isPlaying = info.IsPlaying;
+
                 if (info.IsPlaying)
                 {
-                    _btnPlay.Content = "⏸";
                     FlyIn();
                     ResumeSpinning();
                 }
                 else
                 {
-                    _btnPlay.Content = "▶";
                     FlyOut();
                     PauseSpinning();
                 }
@@ -996,17 +892,19 @@ namespace VinylNowPlaying
         {
             Dispatcher.Invoke(() =>
             {
+                _isPlaying = isPlaying;
                 if (isPlaying)
                 {
-                    _btnPlay.Content = "⏸";
+                    _lastUpdateMoment = DateTime.Now;
                     FlyIn();
                     ResumeSpinning();
+                    _smoothTimelineTimer.Start();
                 }
                 else
                 {
-                    _btnPlay.Content = "▶";
                     FlyOut();
                     PauseSpinning();
+                    _smoothTimelineTimer.Stop();
                 }
             });
         }
@@ -1015,19 +913,39 @@ namespace VinylNowPlaying
         {
             Dispatcher.Invoke(() =>
             {
-                if (dur.TotalSeconds > 0)
-                {
-                    _txtTime.Text = string.Format("{0:mm\\:ss} / {1:mm\\:ss}", pos, dur);
-                    double maxWidth = 180;
-                    double fraction = Math.Max(0, Math.Min(1, pos.TotalSeconds / dur.TotalSeconds));
-                    _progressBarFill.Width = maxWidth * fraction;
-                }
-                else
-                {
-                    _txtTime.Text = "";
-                    _progressBarFill.Width = 0;
-                }
+                _currentPosition = pos;
+                _duration = dur;
+                _lastUpdateMoment = DateTime.Now;
+
+                UpdateLiveTimeline();
             });
+        }
+
+        private void UpdateLiveTimeline()
+        {
+            if (_duration.TotalSeconds > 0)
+            {
+                TimeSpan displayPos = _currentPosition;
+                if (_isPlaying && _lastUpdateMoment != DateTime.MinValue)
+                {
+                    TimeSpan delta = DateTime.Now - _lastUpdateMoment;
+                    displayPos = _currentPosition + delta;
+                    if (displayPos > _duration)
+                        displayPos = _duration;
+                    if (displayPos < TimeSpan.Zero)
+                        displayPos = TimeSpan.Zero;
+                }
+
+                _txtTime.Text = string.Format("{0:mm\\:ss} / {1:mm\\:ss}", displayPos, _duration);
+                double maxWidth = 215;
+                double fraction = Math.Max(0, Math.Min(1, displayPos.TotalSeconds / _duration.TotalSeconds));
+                _progressBarFill.Width = maxWidth * fraction;
+            }
+            else
+            {
+                _txtTime.Text = "";
+                _progressBarFill.Width = 0;
+            }
         }
 
         public void TriggerTestAnimation()
@@ -1061,6 +979,7 @@ namespace VinylNowPlaying
         protected override void OnClosed(EventArgs e)
         {
             _pollTimer.Stop();
+            _smoothTimelineTimer.Stop();
             base.OnClosed(e);
         }
     }
@@ -1070,41 +989,47 @@ namespace VinylNowPlaying
     // ==========================================
     public class Program : Application
     {
-        private const string RUN_KEY = @"Software\Microsoft\Windows\CurrentVersion\Run";
-        private const string APP_NAME = "VinylNowPlaying";
-
         private static Mutex _appMutex;
         private NotifyIcon _trayIcon;
         private MainWindow _mainWindow;
         private MediaManager _mediaManager;
 
+        private static string GetStartupShortcutPath()
+        {
+            string startupFolder = Environment.GetFolderPath(Environment.SpecialFolder.Startup);
+            return System.IO.Path.Combine(startupFolder, "VinylNowPlaying.lnk");
+        }
+
         public static bool IsAutoStartEnabled()
         {
-            try
-            {
-                using (RegistryKey key = Registry.CurrentUser.OpenSubKey(RUN_KEY, false))
-                {
-                    return key != null && key.GetValue(APP_NAME) != null;
-                }
-            }
-            catch { return false; }
+            return File.Exists(GetStartupShortcutPath());
         }
 
         public static void SetAutoStart(bool enable)
         {
             try
             {
-                using (RegistryKey key = Registry.CurrentUser.OpenSubKey(RUN_KEY, true))
+                string shortcutPath = GetStartupShortcutPath();
+                if (enable)
                 {
-                    if (key == null) return;
-                    if (enable)
+                    Type shellType = Type.GetTypeFromProgID("WScript.Shell");
+                    if (shellType != null)
                     {
+                        object shell = Activator.CreateInstance(shellType);
+                        object shortcut = shellType.InvokeMember("CreateShortcut", BindingFlags.InvokeMethod, null, shell, new object[] { shortcutPath });
+                        Type scType = shortcut.GetType();
                         string exePath = Process.GetCurrentProcess().MainModule.FileName;
-                        key.SetValue(APP_NAME, "\"" + exePath + "\"");
+                        scType.InvokeMember("TargetPath", BindingFlags.SetProperty, null, shortcut, new object[] { exePath });
+                        scType.InvokeMember("WorkingDirectory", BindingFlags.SetProperty, null, shortcut, new object[] { System.IO.Path.GetDirectoryName(exePath) });
+                        scType.InvokeMember("Description", BindingFlags.SetProperty, null, shortcut, new object[] { "Vinyl Now Playing Widget" });
+                        scType.InvokeMember("Save", BindingFlags.InvokeMethod, null, shortcut, null);
                     }
-                    else
+                }
+                else
+                {
+                    if (File.Exists(shortcutPath))
                     {
-                        key.DeleteValue(APP_NAME, false);
+                        File.Delete(shortcutPath);
                     }
                 }
             }
@@ -1126,7 +1051,7 @@ namespace VinylNowPlaying
                 return;
             }
 
-            // Ensure auto-start with Windows is enabled by default
+            // Ensure shortcut in Startup folder exists
             if (!IsAutoStartEnabled())
             {
                 SetAutoStart(true);
@@ -1188,7 +1113,7 @@ namespace VinylNowPlaying
             itemToggle.Click += (s, e) => _mainWindow.ToggleVisibility();
             menu.Items.Add(itemToggle);
 
-            ToolStripMenuItem itemAuto = new ToolStripMenuItem("🚀 Автозагрузка с Windows");
+            ToolStripMenuItem itemAuto = new ToolStripMenuItem("🚀 Автозагрузка (Папка Startup)");
             itemAuto.CheckOnClick = true;
             itemAuto.Checked = IsAutoStartEnabled();
             itemAuto.CheckedChanged += (s, e) => SetAutoStart(itemAuto.Checked);
