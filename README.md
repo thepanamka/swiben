@@ -41,7 +41,3 @@
 ```
 VinylNowPlaying.exe
 ```
-Или с проверкой демо-анимации:
-```
-VinylNowPlaying.exe --test
-```
